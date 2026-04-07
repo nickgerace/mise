@@ -439,9 +439,11 @@ impl Lock {
                                     }
                                 }
                             }
-                            // For "latest" or prefix requests not yet matched, find the
-                            // best installed version (handles overridden tools)
-                            if request.version() == "latest" {
+                            // For "latest" requests where no version was already resolved
+                            // in the first pass, find the best installed version
+                            // (handles overridden tools)
+                            let tool_already_resolved = seen.iter().any(|(s, _)| s == &ba.short);
+                            if request.version() == "latest" && !tool_already_resolved {
                                 let installed = backend.list_installed_versions();
                                 if let Some(latest_version) = installed.iter().max_by(|a, b| {
                                     versions::Versioning::new(a).cmp(&versions::Versioning::new(b))
@@ -799,6 +801,26 @@ mod tests {
         assert_eq!(
             lockfile.all_platform_keys(),
             std::collections::BTreeSet::from(["linux-x64".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_duplicate_tool_versions_prevent_stale_pruning() {
+        let cmd = lock_cmd(&[]);
+        let mut lockfile = lockfile_with_dummy();
+
+        let correct_tools = vec![configured_tool("dummy", "2.0.0")];
+        let current = cmd.current_tool_versions(&correct_tools);
+        assert_eq!(
+            current.get("dummy"),
+            Some(&std::collections::BTreeSet::from(["2.0.0".to_string()])),
+            "Only the resolved version should be current"
+        );
+
+        cmd.prune_stale_versions(&mut lockfile, &correct_tools);
+        assert!(
+            lockfile.all_platform_keys().is_empty(),
+            "Stale dummy@1.0.0 lockfile entry should be pruned"
         );
     }
 }
